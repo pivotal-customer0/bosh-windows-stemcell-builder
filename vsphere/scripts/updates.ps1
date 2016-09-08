@@ -6,17 +6,26 @@ function LogWrite {
    Write-Host $logstring
 }
 
+$UpdatesListPath = "A:\windows-updates-list.csv"
+
 $IgnoredUpdateCategories = "Feature Packs", "Update Rollups", "Silverlight"
 
 $UpdateCategories = "Security Updates", "Critical Updates", "Windows Server 2012 R2", "Updates"
 
-function Install-Updates() {
-    # Loop until we successful connect to the update server
+function Install-Updates {
+    Param ([string[]]$updateList)
+
+    # Loop until we successfully connect to the update server
     $sleepSeconds = 5
     $maxAttempts = 10
     for ($i = 0; $i -le $maxAttempts; $i++) {
         try {
-            $updateResult = Get-WUInstall -MicrosoftUpdate -AutoReboot -AcceptAll -IgnoreUserInput -Debuger -Category $UpdateCategories -NotCategory $IgnoredUpdateCategories
+            if ($updateList.count -gt 0) {
+               # Only install approved updates
+               $updateResult = Get-WUInstall -MicrosoftUpdate -AutoReboot -AcceptAll -IgnoreUserInput -Debuger -KBArticleID $updateList 
+            } else {
+               $updateResult = Get-WUInstall -MicrosoftUpdate -AutoReboot -AcceptAll -IgnoreUserInput -Debuger -Category $UpdateCategories -NotCategory $IgnoredUpdateCategories
+            }
             return $updateResult
         } catch {
             if ($_ -match "HRESULT: 0x8024402C") {
@@ -31,13 +40,21 @@ function Install-Updates() {
     return $FALSE
 }
 
-function Update-Count() {
-    # Loop until we successful connect to the update server
+function Update-Count {
+    Param ([string[]]$updateList)
+
+    # Loop until we successfully connect to the update server
     $sleepSeconds = 5
     $maxAttempts = 10
     for ($i = 0; $i -le $maxAttempts; $i++) {
         try {
-            $count = (Get-WUList -MicrosoftUpdate -IgnoreUserInput -Category $UpdateCategories -NotCategory $IgnoredUpdateCategories | measure).Count
+            $count = 0
+            if ($updateList.count -gt 0) {
+               # Only check for approved updates
+               $count = (Get-WUList -MicrosoftUpdate -IgnoreUserInput -KBArticleID $updateList | measure).Count
+            } else {
+               $count = (Get-WUList -MicrosoftUpdate -IgnoreUserInput -Category $UpdateCategories -NotCategory $IgnoredUpdateCategories | measure).Count
+            }
             return $count
         } catch {
             if ($_ -match "HRESULT: 0x8024402C") {
@@ -52,6 +69,17 @@ function Update-Count() {
     return $FALSE
 }
 
+function GetUpdateKBIDs() {
+    $content = Get-Content -Path $UpdatesListPath
+    if ($content -Contains "ALL_AVAILABLE") {
+        LogWrite "Installing all available Windows updates"
+        return @()
+    }
+
+    LogWrite "Installing only the selected Windows updates specified in $UpdatesListPath"
+    return (Import-Csv $UpdatesListPath).HotFixID
+}
+
 LogWrite "Checking for Windows updates"
 try {
     Import-Module PSWindowsUpdate
@@ -59,12 +87,15 @@ try {
     # Loop until there are no more updates
     $sleepSeconds = 5
     $maxAttempts = 10
+
+    $updateList = GetUpdateKBIDs
+
     for ($i = 0; $i -le $maxAttempts; $i++) {
         LogWrite "Installing updates attempt #$i"
-        Install-Updates
+        Install-Updates($updateList)
         LogWrite "Finished updates attempt #$i"
 
-        $count = Update-Count
+        $count = Update-Count($updateList)
         if ($count -eq 0) {
             LogWrite "No more updates to install"
             Exit 0

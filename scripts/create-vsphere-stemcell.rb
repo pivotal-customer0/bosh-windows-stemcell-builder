@@ -7,6 +7,7 @@ require 'open3'
 require 'securerandom'
 require 'pathname'
 require 'mkmf'
+require 'open-uri'
 require_relative '../erb_templates/templates.rb'
 
 # concourse inputs
@@ -14,10 +15,9 @@ VERSION = File.read("version/number").chomp
 DEPS_URL = File.read("bosh-agent-deps-zip/url").chomp
 AGENT_URL = File.read("bosh-agent-zip/url").chomp
 AGENT_COMMIT = File.read("bosh-agent-sha/sha").chomp
-
 WINDOWS_UPDATE_PATH = File.absolute_path(Dir.glob('ps-windows-update/*.zip').first)
+WINDOWS_UPDATES_LIST_URL = File.file?("windows-updates-list/url") ? File.read("windows-updates-list/url").chomp : ""
 ISO_URL = File.absolute_path(Dir.glob('base-iso/*.iso').first)
-
 ULTRADEFRAG_PATH = File.absolute_path('ultradefrag-zip/ultradefrag-portable-7.0.1.bin.amd64.zip')
 
 OUTPUT_DIR = ENV.fetch("OUTPUT_DIR")
@@ -60,6 +60,21 @@ def create_network_interface_settings(builder_path, address, mask, gateway)
   end
 end
 
+def get_windows_updates_list(builder_path, list_url)
+  list_path = "#{builder_path}/windows-updates-list.csv"
+
+  # Only approved updates in CSV should be installed
+  if !list_url.nil? && !list_url.empty?
+    open(list_url, 'r') do |f|
+      File.write(list_path, f.read)
+    end
+
+  # Ignore list of updates, try to install all available
+  else
+    File.write(list_path, 'ALL_AVAILABLE')
+  end
+end
+
 def gzip_file(name, output)
   Zlib::GzipWriter.open(output) do |gz|
    File.open(name) do |fp|
@@ -71,30 +86,16 @@ def gzip_file(name, output)
   end
 end
 
-def packer_command(command, config_path)
+def packer_command(command, packer_vars, config_path)
   Dir.chdir(File.dirname(config_path)) do
 
-    args = %{
-      packer #{command} \
-      -var "iso_url=#{ISO_URL}" \
-      -var "iso_checksum_type=#{ISO_CHECKSUM_TYPE}" \
-      -var "iso_checksum=#{ISO_CHECKSUM}" \
-      -var "deps_url=#{DEPS_URL}" \
-      -var "agent_url=#{AGENT_URL}" \
-      -var "memsize=#{MEMSIZE}" \
-      -var "numvcpus=#{NUMVCPUS}" \
-      -var "remote_host=#{REMOTE_HOST}" \
-      -var "remote_port=#{REMOTE_PORT}" \
-      -var "remote_datastore=#{REMOTE_DATASTORE}" \
-      -var "remote_cache_datastore=#{REMOTE_CACHE_DATASTORE}" \
-      -var "remote_cache_directory=#{REMOTE_CACHE_DIRECTORY}" \
-      -var "remote_username=#{REMOTE_USERNAME}" \
-      -var "remote_password=#{REMOTE_PASSWORD}" \
-      -var "administrator_password=#{ADMINISTRATOR_PASSWORD}" \
-      -var "winrm_host=#{GUEST_NETWORK_ADDRESS}" \
-      #{config_path}
-    }
-    Open3.popen2e(args) do |stdin, stdout_stderr, wait_thr|
+    vars_joined = packer_vars.map{ |k, v| "-var '#{k}=#{v}'"}.join(" ")
+    full_command = "packer #{command} #{vars_joined} #{config_path}"
+
+    puts full_command
+    abort("laskjflasj")
+
+    Open3.popen2e(full_command) do |stdin, stdout_stderr, wait_thr|
       stdout_stderr.each_line do |line|
         puts line
       end
@@ -150,13 +151,34 @@ BUILDER_PATH=File.expand_path("../..", __FILE__)
 
 create_network_interface_settings(BUILDER_PATH, GUEST_NETWORK_ADDRESS, GUEST_NETWORK_MASK, GUEST_NETWORK_GATEWAY)
 
+get_windows_updates_list(BUILDER_PATH, WINDOWS_UPDATES_LIST_URL)
+
 packer_config = File.join(BUILDER_PATH, "vsphere", "packer.json")
 packer_command('validate', packer_config)
 
 FileUtils.mv(WINDOWS_UPDATE_PATH, File.join(File.dirname(packer_config), "PSWindowsUpdate.zip"))
 FileUtils.mv(ULTRADEFRAG_PATH, File.join(File.dirname(packer_config), "ultradefrag.zip"))
 
-packer_command('build', packer_config)
+packer_vars = {
+  "iso_url" => ISO_URL,
+  "iso_checksum_type" => ISO_CHECKSUM_TYPE,
+  "iso_checksum" => ISO_CHECKSUM,
+  "deps_url" => DEPS_URL,
+  "agent_url" => AGENT_URL,
+  "memsize" => MEMSIZE,
+  "numvcpus" => NUMVCPUS,
+  "remote_host" => REMOTE_HOST,
+  "remote_port" => REMOTE_PORT,
+  "remote_datastore" => REMOTE_DATASTORE,
+  "remote_cache_datastore" => REMOTE_CACHE_DATASTORE,
+  "remote_cache_directory" => REMOTE_CACHE_DIRECTORY,
+  "remote_username" => REMOTE_USERNAME,
+  "remote_password" => REMOTE_PASSWORD,
+  "administrator_password" => ADMINISTRATOR_PASSWORD,
+  "winrm_host" => GUEST_NETWORK_ADDRESS
+}
+
+packer_command('build', packer_vars, packer_config)
 
 ova_file = Dir.glob('**/packer-vmware-iso.ova' ).select { |fn| File.file?(fn) }
 if ova_file.length == 0
