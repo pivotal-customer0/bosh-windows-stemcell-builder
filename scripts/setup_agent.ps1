@@ -26,6 +26,11 @@ Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Invoke-WebRequest "${ENV:AGENT_DEPS_ZIP_URL}" -Verbose -OutFile "C:\bosh\agent_deps.zip"
 Unzip "C:\bosh\agent_deps.zip" "C:\var\vcap\bosh\bin\"
+Move-Item "C:\var\vcap\bosh\bin\tar-*.exe" "C:\var\vcap\bosh\bin\tar.exe"
+Move-Item "C:\var\vcap\bosh\bin\zlib1-*.exe" "C:\var\vcap\bosh\bin\zlib1.dll"
+Move-Item "C:\var\vcap\bosh\bin\job-service-wrapper-*.exe" "C:\var\vcap\bosh\bin\job-service-wrapper.exe"
+Move-Item "C:\var\vcap\bosh\bin\s3cli-*-windows-amd64" "C:\var\vcap\bosh\bin\bosh-blobstore-s3.exe"
+Move-Item "C:\var\vcap\bosh\bin\davcli-*-windows-amd64" "C:\var\vcap\bosh\bin\bosh-blobstore-dav.exe"
 
 Invoke-WebRequest "${ENV:AGENT_ZIP_URL}" -Verbose -OutFile "C:\bosh\agent.zip"
 Unzip "C:\bosh\agent.zip" "C:\bosh\"
